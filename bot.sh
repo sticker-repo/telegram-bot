@@ -4,7 +4,7 @@
 # set -x
 
 # needed envs:
-# BOT_TOKEN, ADMIN_CHAT_ID, STICKER_DIR, REPO_URL
+# BOT_TOKEN, ADMIN_CHAT_ID, STICKER_DIR, REPO_URL, CURL_OPTION
 
 ADMIN_CHAT_IDS=("$ADMIN_CHAT_ID")
 declare -A MESSAGE_MAP  # Map to track sent messages: "chat_id,message_id,sticker_set_name" -> report_message_id
@@ -12,6 +12,8 @@ declare -A MESSAGE_MAP  # Map to track sent messages: "chat_id,message_id,sticke
 # STICKER_DIR="/app/repo/s1"
 STICKER_INFO_DIR="$STICKER_DIR/info"
 STICKER_FILES_DIR="$STICKER_DIR/files"
+
+read -r -a curl_opts <<< "$CURL_OPTION"
 
 initialize() {
     ssh-keyscan github.com >> /root/.ssh/known_hosts
@@ -133,7 +135,7 @@ send_message() {
         if [[ -n "$parse_mode" ]]; then
             data="$data&parse_mode=$parse_mode"
         fi
-        local response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/editMessageText" -d "$data")
+        local response=$(curl "${curl_opts[@]}" -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/editMessageText" -d "$data")
     else
         # Send new message
         local data="chat_id=$chat_id&text=$text"
@@ -143,7 +145,7 @@ send_message() {
         if [[ -n "$reply_to_message_id" && "$reply_to_message_id" != "null" ]]; then
             data="$data&reply_to_message_id=$reply_to_message_id"
         fi
-        local response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -d "$data")
+        local response=$(curl "${curl_opts[@]}" -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -d "$data")
         
         # Extract and store the new message ID
         local new_message_id=$(echo "$response" | jq -r '.result.message_id // empty')
@@ -159,7 +161,7 @@ send_message() {
 
 download_sticker_set_info() {
     local set_name="$1"
-    response=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getStickerSet?name=$set_name")
+    response=$(curl "${curl_opts[@]}" -s "https://api.telegram.org/bot$BOT_TOKEN/getStickerSet?name=$set_name")
 
     if [[ $(echo "$response" | jq -r '.ok') == "true" ]]; then
         echo "$response" | jq -c '.result + {last_sticker_info_download: now | floor}' > "$STICKER_INFO_DIR/$set_name.json"
@@ -174,7 +176,7 @@ download_file() {
     local url="$1"
     local file_name="$2"
 
-    curl -s -o "$file_name" "$url"
+    curl "${curl_opts[@]}" -s -o "$file_name" "$url"
 }
 
 handle_sticker() {
@@ -212,7 +214,7 @@ handle_sticker() {
     for sticker in $stickers; do
         file_id=$(echo "$sticker" | jq -r '.file_id')
         file_unique_id=$(echo "$sticker" | jq -r '.file_unique_id')
-        file_path=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getFile?file_id=$file_id" | jq -r '.result.file_path')
+        file_path=$(curl "${curl_opts[@]}" -s "https://api.telegram.org/bot$BOT_TOKEN/getFile?file_id=$file_id" | jq -r '.result.file_path')
         extension="${file_path##*.}"
         set_info=$(echo "$set_info" | jq --arg unique_id "$file_unique_id" --arg ext "$extension" '.stickers |= map(if .file_unique_id == $unique_id then . + {extension: $ext} else . end)')
         download_file "https://api.telegram.org/file/bot$BOT_TOKEN/$file_path" "$STICKER_FILES_DIR/$sticker_set_name/$file_unique_id.$extension"
@@ -225,7 +227,7 @@ handle_sticker() {
     thumb_file_id=$(echo "$set_info" | jq -r 'if .thumbnail.file_id then .thumbnail.file_id 
                     else .stickers[0].file_id end')
     if [[ "$thumb_file_id" != "null" ]]; then
-        file_path=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getFile?file_id=$thumb_file_id" | jq -r '.result.file_path')
+        file_path=$(curl "${curl_opts[@]}" -s "https://api.telegram.org/bot$BOT_TOKEN/getFile?file_id=$thumb_file_id" | jq -r '.result.file_path')
         extension="${file_path##*.}"
         set_info=$(echo "$set_info" | jq --arg ext "$extension" '. + {thumbnail_extension: $ext}')
         download_file "https://api.telegram.org/file/bot$BOT_TOKEN/$file_path" "$STICKER_FILES_DIR/$sticker_set_name/thumbnail.$extension"
@@ -250,7 +252,7 @@ start_bot() {
     # Bot update loop
     offset=0
     while true; do
-        response=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$offset&timeout=120")
+        response=$(curl "${curl_opts[@]}" -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$offset&timeout=120")
         offset=$(echo "$response" | jq '.result | map(.update_id) | max + 1')
 
         # Iterate over each update in the response
@@ -259,7 +261,7 @@ start_bot() {
             message_id=$(echo "$update" | jq -r '.message.message_id // empty')
             message_text=$(echo "$update" | jq -r '.message.text // empty')
 
-            # if [[ "${ADMIN_CHAT_IDS[@]}" =~ "$chat_id" ]]; then
+            if [[ "${ADMIN_CHAT_IDS[@]}" =~ "$chat_id" ]]; then
                 # Check for sticker message
                 sticker_set_name=$(echo "$update" | jq -r '.message.sticker.set_name // empty')
                 if [[ -n "$sticker_set_name" ]]; then
@@ -291,7 +293,7 @@ start_bot() {
                         links=${links/${BASH_REMATCH[0]}/}
                     done
                 fi                
-            # fi
+            fi
         done
         sleep 1
     done
