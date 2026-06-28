@@ -9,6 +9,9 @@ main() {
         reindex)
             reindex
             ;;
+        add_pack_to_matrix_for_all_webps)
+            add_pack_to_matrix_for_all_webps
+            ;;
         *)
             echo -e "Unknown command: $command"
             ;;
