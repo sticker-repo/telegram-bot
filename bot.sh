@@ -4,7 +4,7 @@
 # set -x
 
 # needed envs:
-# BOT_TOKEN, ADMIN_CHAT_ID, STICKER_DIR, REPO_URL, CURL_OPTION
+# BOT_TOKEN, ADMIN_CHAT_ID, STICKER_DIR, REPO_URL, CURL_OPTION, MATRIX_AUTH_TOKEN, MATRIX_WEBP_ROOM_ID
 
 ADMIN_CHAT_IDS=("$ADMIN_CHAT_ID")
 declare -A MESSAGE_MAP  # Map to track sent messages: "chat_id,message_id,sticker_set_name" -> report_message_id
@@ -27,6 +27,17 @@ initialize() {
         git sparse-checkout set --no-cone '/*' '!files'
     fi
 
+    mkdir -p "$STICKER_INFO_DIR"
+    mkdir -p "$STICKER_FILES_DIR"
+}
+
+garbage_collection() {
+    rm -rf "$STICKER_DIR/.git"
+
+    git clone --filter=blob:none --sparse $REPO_URL $STICKER_DIR
+    cd $STICKER_DIR
+    git sparse-checkout set --no-cone '/*' '!files'
+    
     mkdir -p "$STICKER_INFO_DIR"
     mkdir -p "$STICKER_FILES_DIR"
 }
@@ -84,6 +95,71 @@ reindex() {
     echo "$emoji_index" > "$STICKER_DIR/emoji_index.json"
     rm "$STICKER_DIR/emoji_index.json.gz"
     gzip -k "$STICKER_DIR/emoji_index.json"
+}
+
+add_pack_to_matrix() {
+    local set_name="$1"
+    local ext="$2"
+    if [[ "$ext" == "webp" ]]; then
+        echo "Adding webp sticker pack to matrix room"
+        local event=$(jq '
+            def ext_to_mimetype:
+                ascii_downcase |
+                if . == "png" then "image/png"
+                elif . == "jpg" or . == "jpeg" then "image/jpeg"
+                elif . == "webp" then "image/webp"
+                elif . == "webm" then "video/webm"
+                elif . == "gif" then "image/gif"
+                elif . == "tgs" then "video/tgs"
+                else null
+                end;
+
+            . as $data |
+            (
+                if ($data.sticker_type | tostring | contains("emoji")) then
+                    "https://t.me/addemoji/\($data.name)"
+                else
+                    "https://t.me/addstickers/\($data.name)"
+                end
+            ) as $link |
+            {
+                images: (
+                    [$data.stickers | to_entries[] | select(.value.premium_animation == null)] |
+                    map(
+                    .key as $idx |
+                    .value as $sticker |
+                    {
+                        ($idx | tostring): {
+                        url: "mxc://mtx.sticker-repo.workers.dev/s1-\($data.name)-\($sticker.file_unique_id)-\($sticker.extension)",
+                        body: $sticker.emoji,
+                        info: ($sticker.extension | ext_to_mimetype | if . then {mimetype: .} else empty end)
+                        }
+                    }
+                    ) |
+                    add // {}
+                ),
+                pack: {
+                    display_name: $data.name,
+                    attribution: "[sticker-repo.github.io] Original pack at \($link)",
+                    usage: ["sticker", "emoticon"]
+                }
+            }
+            ' "$STICKER_INFO_DIR/$set_name.json")
+        curl "${curl_opts[@]}" -X PUT \
+            "https://matrix.org/_matrix/client/v3/rooms/$MATRIX_WEBP_ROOM_ID/state/im.ponies.room_emotes/$set_name" \
+            -H "Authorization: Bearer $MATRIX_AUTH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$event"
+    fi
+}
+
+add_pack_to_matrix_for_all_webps() {
+    echo "Start adding webp stickers to the room"
+
+    jq -r '.webp[]' "$STICKER_DIR/thumbnails.json" | while read set_name; do
+        add_pack_to_matrix "$set_name" "webp"
+        sleep 10s
+    done
 }
 
 update_repo() {
@@ -233,6 +309,7 @@ handle_sticker() {
         download_file "https://api.telegram.org/file/bot$BOT_TOKEN/$file_path" "$STICKER_FILES_DIR/$sticker_set_name/thumbnail.$extension"
         send_message "Indexing '$sticker_set_name'" "$chat_id" "$message_id" "$sticker_set_name"
         update_index "$sticker_set_name" "$extension" "$stickers"
+        add_pack_to_matrix "$sticker_set_name" "$extension"
     fi
 
     # Update last download timestamp
