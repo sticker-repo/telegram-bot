@@ -101,7 +101,8 @@ add_pack_to_matrix() {
     local set_name="$1"
     local ext="$2"
     if [[ "$ext" == "webp" ]]; then
-        echo "Adding webp sticker pack to matrix room"
+        echo
+        echo "Adding webp sticker pack '$set_name' to matrix room"
         local event=$(jq '
             def ext_to_mimetype:
                 ascii_downcase |
