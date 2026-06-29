@@ -339,26 +339,28 @@ start_bot() {
             message_id=$(echo "$update" | jq -r '.message.message_id // empty')
             message_text=$(echo "$update" | jq -r '.message.text // empty')
 
-            if [[ "${ADMIN_CHAT_IDS[@]}" =~ "$chat_id" ]]; then
+            # if [[ "${ADMIN_CHAT_IDS[@]}" =~ "$chat_id" ]]; then
                 # Check for sticker message
                 sticker_set_name=$(echo "$update" | jq -r '.message.sticker.set_name // empty')
                 if [[ -n "$sticker_set_name" ]]; then
                     send_message "Sticker set '$sticker_set_name'" "$chat_id" "$message_id" "$sticker_set_name"
                     handle_sticker "$sticker_set_name" "$chat_id" "$message_id"
                 elif [[ $message_text =~ ^force\ download\ link(.*) ]]; then
-                    # Get the rest of the message excluding "download link"
-                    links="${BASH_REMATCH[1]}"
+                    if [[ "${ADMIN_CHAT_IDS[@]}" =~ "$chat_id" ]]; then
+                        # Get the rest of the message excluding "download link"
+                        links="${BASH_REMATCH[1]}"
 
-                    # Use a loop to find and process all links
-                    while [[ $links =~ t\.me/(addemoji|addstickers)/([a-zA-Z0-9\\-\_]+) ]]; do
-                        sticker_set_name="${BASH_REMATCH[2]}"
+                        # Use a loop to find and process all links
+                        while [[ $links =~ t\.me/(addemoji|addstickers)/([a-zA-Z0-9\\-\_]+) ]]; do
+                            sticker_set_name="${BASH_REMATCH[2]}"
 
-                        send_message "Sticker set '$sticker_set_name' [force-download]" "$chat_id" "$message_id" "$sticker_set_name"
-                        handle_sticker "$sticker_set_name" "$chat_id" "$message_id" true
-                        
-                        # Remove the processed link from links
-                        links=${links/${BASH_REMATCH[0]}/}
-                    done
+                            send_message "Sticker set '$sticker_set_name' [force-download]" "$chat_id" "$message_id" "$sticker_set_name"
+                            handle_sticker "$sticker_set_name" "$chat_id" "$message_id" true
+                            
+                            # Remove the processed link from links
+                            links=${links/${BASH_REMATCH[0]}/}
+                        done
+                    fi
                 else
                     links="$message_text"
                     while [[ $links =~ t\.me/(addemoji|addstickers)/([a-zA-Z0-9\\-\_]+) ]]; do
@@ -371,7 +373,7 @@ start_bot() {
                         links=${links/${BASH_REMATCH[0]}/}
                     done
                 fi                
-            fi
+            # fi
         done
         sleep 1
     done
