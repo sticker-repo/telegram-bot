@@ -111,7 +111,7 @@ add_pack_to_matrix() {
                 elif . == "webp" then "image/webp"
                 elif . == "webm" then "video/webm"
                 elif . == "gif" then "image/gif"
-                elif . == "tgs" then "video/tgs"
+                elif . == "tgs" then "image/tgs"
                 else null
                 end;
 
